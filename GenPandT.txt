@@ -1,0 +1,529 @@
+Option Explicit
+
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+' パラメータ一覧生成ツール GenerateConstParamAndTableReference
+'
+' $Id$
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+''''''定数
+Const BOOKNAME1 As String = "testB.xlsm" '本体のブック名
+Const SHEETNAME1 As String = "トップファイル一覧" 'シート名
+Const SHEETNAME2 As String = "モデル階層" 'シート名
+Const SHEETNAME3 As String = "定数パラメータ" 'シート名
+Const SHEETNAME4 As String = "テーブル" 'シート名
+Const RANGE1 As String = "C4" 'フォルダ名の位置
+Const RANGE2 As String = "B2:ZZ3" 'モデル階層シートの初期化場所(1)
+Const RANGE3 As String = "B5:ZZ9999" 'モデル階層シートの初期化位置(2)
+Const PROPERTY1 As String = "Modelプロパティ" '子モデルのプロパティ名
+Const PROPERTY2 As String = "Constプロパティ" '定数パラメータのプロパティ名
+Const PROPERTY3 As String = "Tableプロパティ" '1次元テーブルのプロパティ名
+
+Const MAXLEVEL As Integer = 100 ' 子モデルの最大レベル
+
+
+
+''''''グローバル変数
+Dim NumOfFind As Integer  '検索結果個数
+Dim Hits(999) As String  '検索でヒットしたデータ
+Dim FolderName1 As String 'ファイルのフォルダ名
+
+
+
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'機能:メイン処理
+'要件定義名称とそのトップレベルのモデル名から、子モデルを含む全ての
+'モデルの定数パラメータとテーブルの定義を、モデルレポートファイルと
+'指定DDファイルを参照し、一覧表を作成する。
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub GenerateConstParamAndTableReference()
+   Application.ScreenUpdating = False '画面更新抑止
+     'フォルダ名検証
+   FolderName1 = MakeDirName(Workbooks(BOOKNAME1).Worksheets(SHEETNAME1).Range(RANGE1).Value)
+   
+   Call InitWorksheet '作業用シートの初期化
+   Call ToplevelModelNames 'トップレベルのモデル登録とカウンタセット
+   Call ChildModelNames '子レベルのモデル登録とカウンタセット
+   Call Prepares '定数とパラメータの準備
+   Call ParamNames '定数パラメータの登録
+   Call TableNames 'テーブルの登録
+  
+   Application.ScreenUpdating = True '画面更新抑止解除
+End Sub
+
+
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'機能:作業用ワークシートの初期化
+'
+'入力:なし
+'出力:作業用ワークシート
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub InitWorksheet()
+   Workbooks(BOOKNAME1).Activate
+   Worksheets(SHEETNAME2).Activate
+   Range(RANGE2).Value = ""     'XXXXXXXXX
+   Range(RANGE3).Value = ""  'XXXXXXXXX
+End Sub
+
+
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'機能:モデルのトップレベルモデル名をセットする
+'
+'入力:なし
+'出力:モデル階層シート
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub ToplevelModelNames()
+   Dim i As Integer
+   Dim ToplevelFileName As Range
+   
+   Workbooks(BOOKNAME1).Activate
+   Worksheets(SHEETNAME2).Range("B2").Value = 0 'トップレベルのカウンタ初期化
+   Worksheets(SHEETNAME2).Range("B3").Value = 0
+   i = 0
+   Worksheets(SHEETNAME1).Activate
+   'トップレベルモデルを登録する。
+   For Each ToplevelFileName In Range(Range("D4"), Range("D4").End(xlDown))
+       Worksheets(SHEETNAME2).Range("B5").Offset(i, 0).Value = ToplevelFileName.Value
+       i = i + 1
+       Worksheets(SHEETNAME2).Range("B2").Value = i 'トップレベルのカウンタ1（トップレベルの数）
+   Next
+End Sub
+
+
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'機能:モデル階層シートを作成する
+'
+'入力:なし
+'出力:モデル階層シート
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub ChildModelNames()
+    Dim ProcLevel As Integer '処理中のレベル
+    Dim i, j, k As Integer
+
+
+    Workbooks(BOOKNAME1).Activate
+    Worksheets(SHEETNAME2).Activate
+    ProcLevel = 0
+    
+    Do  '全レベルのループ
+       
+        Range("B2").Offset(0, ProcLevel + 1).Value = 0 '子レベルのカウンタ初期化
+        Range("B3").Offset(0, ProcLevel + 1).Value = 0
+        i = 0
+        'レベル内ループ
+        Do While Range("B2").Offset(0, ProcLevel).Value <> Range("B3").Offset(0, ProcLevel).Value
+            If Range("B5").Offset(i, ProcLevel).Value <> "" Then
+                'ファイルを開いて子モデルを登録
+                k = GetModelProperty(Range("B5").Offset(i, ProcLevel).Value, PROPERTY1)
+                Debug.Print "GetModelProperty = " & k
+                Workbooks(BOOKNAME1).Activate 'ブックを本体に戻す
+                Worksheets(SHEETNAME2).Activate
+                
+                If k = -1 Then 'ファイルオープンエラー時は登録を削除する
+                   Range("B5").Offset(i, ProcLevel).EntireRow.Delete
+                   Range("B2").Offset(0, ProcLevel).Value = Range("B2").Offset(0, ProcLevel).Value - 1
+                   i = i - 1 '最後に+1した時に変化しないように
+                Else
+                   Range("B3").Offset(0, ProcLevel).Value = Range("B3").Offset(0, ProcLevel).Value + 1
+                
+                   '子モデルを登録
+                   If NumOfFind >= 1 Then
+                       'まず、直後からヒット数の行を挿入する
+                       For j = 0 To NumOfFind - 1
+                          Range("B5").Offset(i + 1, ProcLevel).EntireRow.Insert
+                       Next j
+                       '挿入した行に子モデルをヒット順に登録する
+                       For j = 0 To NumOfFind - 1
+                          Range("B5").Offset(i + 1 + j, ProcLevel + 1).Value = Hits(j)
+                       Next j
+                       Range("B2").Offset(0, ProcLevel + 1).Value = Range("B2").Offset(0, ProcLevel + 1).Value + NumOfFind
+                    
+                   End If
+                End If
+                
+            End If
+        i = i + 1
+        Loop
+        
+        ProcLevel = ProcLevel + 1 '次のレベル
+    Loop Until Range("B2").Offset(0, ProcLevel).Value = 0 '次のレベルの格納数が0なら終了
+
+End Sub
+
+
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'機能:定数パラメータシートの作成
+'
+'入力:なし
+'出力:定数パラメータシート
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub ParamNames()
+    Dim i, j, k As Integer
+    Dim ModelName As String
+    
+    Worksheets(SHEETNAME3).Activate
+    i = 0
+    'レベル0と1が両方空なら終了
+    Do While Range("B3").Offset(i, 0).Value <> "" Or Range("B3").Offset(i, 1).Value <> ""
+        'レベル0と1から選択　両方空なら終了
+        If Range("B3").Offset(i, 0).Value <> "" Then
+            ModelName = Range("B3").Offset(i, 0).Value
+        Else
+            ModelName = Range("B3").Offset(i, 1).Value
+        End If
+        
+        'モデルファイルの定数パラメータを検索
+        k = GetModelProperty(ModelName, PROPERTY2)
+        Debug.Print "GetModelProperty = " & k
+        Workbooks(BOOKNAME1).Activate 'ブックを本体に戻す
+        Worksheets(SHEETNAME3).Activate
+                
+        If k = -1 Then 'ファイルオープンエラー
+           MsgBox "ERROR:" & ModelName
+        Else
+           '定数パラメータを登録
+           If NumOfFind >= 1 Then
+               'まず、直後からヒット数の行を挿入する
+                For j = 0 To NumOfFind - 1
+                   Range("B3").Offset(i + 1, 2).EntireRow.Insert
+                Next j
+                '挿入した行に定数パラメータをヒット順に登録する
+                For j = 0 To NumOfFind - 1
+                   Range("B3").Offset(i + 1 + j, 2).Value = Hits(j)
+                Next j
+                i = i + NumOfFind
+           End If
+        End If
+        
+        i = i + 1
+    Loop
+  
+End Sub
+
+
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'機能:テーブルシートの作成
+'
+'入力:なし
+'出力:テーブルシート
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub TableNames()
+    Dim i, j, k As Integer
+    Dim ModelName As String
+    
+    Worksheets(SHEETNAME4).Activate
+    i = 0
+    'レベル0と1が両方空なら終了
+    Do While Range("B3").Offset(i, 0).Value <> "" Or Range("B3").Offset(i, 1).Value <> ""
+        'レベル0と1から選択　両方空なら終了
+        If Range("B3").Offset(i, 0).Value <> "" Then
+            ModelName = Range("B3").Offset(i, 0).Value
+        Else
+            ModelName = Range("B3").Offset(i, 1).Value
+        End If
+        
+        'モデルファイルの定数パラメータを検索
+        k = GetModelProperty(ModelName, PROPERTY3)
+        Debug.Print "GetModelProperty = " & k
+        Workbooks(BOOKNAME1).Activate 'ブックを本体に戻す
+        Worksheets(SHEETNAME4).Activate
+                
+        If k = -1 Then 'ファイルオープンエラー
+           MsgBox "ERROR:" & ModelName
+        Else
+           '定数パラメータを登録
+           If NumOfFind >= 1 Then
+               'まず、直後からヒット数の行を挿入する
+                For j = 0 To NumOfFind - 1
+                   Range("B3").Offset(i + 1, 2).EntireRow.Insert
+                Next j
+                '挿入した行に定数パラメータをヒット順に登録する
+                For j = 0 To NumOfFind - 1
+                   Range("B3").Offset(i + 1 + j, 2).Value = Hits(j)
+                Next j
+                i = i + NumOfFind
+           End If
+        End If
+        
+        i = i + 1
+    Loop
+  
+End Sub
+
+
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'機能:定数パラメータとテーブルシートの準備を行う
+'
+'入力:なし
+'出力:定数パラメータとテーブルシート
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub Prepares()
+    Dim i As Integer 'モデル階層の位置
+    Dim j As Integer '定数パラメータの位置
+    Dim k As Integer '子モデルのレベル
+
+
+    ' 定数パラメータとテーブルシートの全クリア
+    Workbooks(1).Activate
+    Sheets(SHEETNAME3).Select
+    Cells.Select
+    Selection.ClearContents
+    Sheets(SHEETNAME4).Select
+    Cells.Select
+    Selection.ClearContents
+    
+    'モデル階層からデータをコピーする
+    i = 0
+    j = 0
+    Do While True
+        If Worksheets(SHEETNAME2).Range("B5").Offset(i, 0).Value <> "" Then 'トップレベルの時
+            Worksheets(SHEETNAME3).Range("B3").Offset(j, 0).Value = Worksheets(SHEETNAME2).Range("B5").Offset(i, 0).Value
+            i = i + 1
+            j = j + 1
+        Else
+            For k = 1 To MAXLEVEL
+                If Worksheets(SHEETNAME2).Range("B5").Offset(i, k).Value <> "" Then '子レベルの時
+                    Worksheets(SHEETNAME3).Range("B3").Offset(j, 1).Value = Worksheets(SHEETNAME2).Range("B5").Offset(i, k).Value
+                    Exit For
+                End If
+            Next k
+            If Worksheets(SHEETNAME3).Range("B3").Offset(j, 1).Value = "" Then '全レベルが空だった時は終了
+                Exit Do
+            Else
+                i = i + 1
+                j = j + 1
+            End If
+
+        End If
+    
+    Loop
+    
+    'セットアップした定数パラメータシートをテーブルシートにもコピーする
+    Sheets(SHEETNAME3).Select
+    Cells.Select
+    Selection.Copy
+    Sheets(SHEETNAME4).Select
+    Cells.Select
+    ActiveSheet.Paste
+    
+    
+End Sub
+
+
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'機能:レンジの各値を重複をチェックしてグローバル配列に格納し、個数を更新する(Model)
+'
+'入力:ModelNames=ワードのあるリージョン
+'出力:NumOfFind(Global)=格納数,Hits(Global)=格納ワード
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub SetModelNames(ModelNames As Range)
+   Dim t As Range
+   Dim s As String
+   Dim i As Integer
+   Dim c As Boolean
+   
+   For Each t In ModelNames
+      s = t.Value
+      If NumOfFind = 0 Then 'まだ空の時
+         NumOfFind = 1
+         Hits(0) = s
+      Else '格納済みと重複チェックする
+         c = False
+         For i = 0 To NumOfFind - 1
+            If Hits(i) = s Then
+               c = True
+               Exit For
+            End If
+         Next i
+         
+         If Not c Then '重複なし
+            Hits(NumOfFind) = s
+            NumOfFind = NumOfFind + 1
+         End If
+         
+      End If
+   Next
+      
+End Sub
+
+
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'機能:レンジの各値を重複をチェックしてグローバル配列に格納(Const)
+'
+'入力:ModelNames=ワードのあるリージョン
+'出力:NumOfFind(Global)=格納数,Hits(Global)=格納ワード
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub SetConstNames(ModelNames As Range)
+   Dim t As Range
+   Dim s As String
+   Dim i As Integer
+   Dim c As Boolean
+   
+   For Each t In ModelNames
+      s = t.Value
+      If NumOfFind = 0 Then 'まだ空の時
+         NumOfFind = 1
+         Hits(0) = s
+      Else '格納済みと重複チェックする
+         c = False
+         For i = 0 To NumOfFind - 1
+            If Hits(i) = s Then
+               c = True
+               Exit For
+            End If
+         Next i
+         
+         If Not c Then '重複なし
+            Hits(NumOfFind) = s
+            NumOfFind = NumOfFind + 1
+         End If
+         
+      End If
+   Next
+      
+End Sub
+
+
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'機能:レンジの各値を重複をチェックしてグローバル配列に格納(Table)
+'テーブルは1行に2つずつあるので、リージョンにつき2つ処理する
+'入力:ModelNames=ワードのあるリージョン
+'出力:NumOfFind(Global)=格納数,Hits(Global)=格納ワード
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub SetTableNames(ModelNames As Range)
+   Dim t As Range
+   Dim s, str(2) As String
+   Dim i As Integer
+   Dim c As Boolean
+   
+   For Each t In ModelNames
+      str(0) = t.Value
+      str(1) = t.Offset(0, 2).Value
+      
+      For Each s In str
+      If s = "" Then GoTo P1
+      If NumOfFind = 0 Then 'まだ空の時
+         NumOfFind = 1
+         Hits(0) = s
+      Else '格納済みと重複チェックする
+         c = False
+         For i = 0 To NumOfFind - 1
+            If Hits(i) = s Then
+               c = True
+               Exit For
+            End If
+         Next i
+         
+         If Not c Then '重複なし
+            Hits(NumOfFind) = s
+            NumOfFind = NumOfFind + 1
+         End If
+      End If
+P1:
+      Next
+   Next
+      
+End Sub
+
+
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'機能:ファイル内でキーワードを検索し、データをグローバル配列に格納する。
+'
+'入力:FileName=検索するファイル名,SProperty=検索するワード
+'出力:n=見つかった数,-1:ファイルオープン失敗
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Function GetModelProperty(FileName As String, SProperty As String) As Integer
+  Dim wb As Workbook
+  Dim StartCell As Range '検索開始位置
+  Dim SRange As Range '見つかったセル
+  Dim SRangeAdr1, SRangeAdr2 As String '見つかったレンジのアドレス
+  Dim SRangeCount As Integer '見つかったレンジ数
+  Dim i As Integer
+  
+  On Error GoTo Err1
+  
+  NumOfFind = 0 'ヒット数クリア
+  SRangeAdr1 = ""
+  SRangeAdr2 = ""
+  SRangeCount = 0
+  
+  Set wb = Workbooks.Open(FolderName1 & "\" & FileName)
+  wb.Activate 'オープンしたモデルファイル
+  Worksheets(1).Activate 'モデルファイルの第一シート(念のため)
+  
+  Set StartCell = Range("A1")
+  
+  Do While True
+     'プロパティ行の検索
+     Set SRange = Columns(1).Find(What:=SProperty, After:=StartCell, LookIn:=xlValues, LookAt:=xlWhole, SearchOrder:=xlByColumns)
+     Set StartCell = SRange
+     If SRange Is Nothing Then '１つもないときは終了
+        Exit Do
+     End If
+     
+     SRangeAdr2 = SRange.Address()
+
+     If SRangeAdr1 = SRangeAdr2 Then  '見つかっても検索が最初に戻った時は終了
+        Exit Do
+     End If
+     
+     SRangeCount = SRangeCount + 1
+     
+     If SRangeCount = 1 Then
+       SRangeAdr1 = SRangeAdr2 '最初に見つかったアドレスを記憶する。
+     End If
+     
+     '見つかった時の処理
+     'キーワードの3行下のリージョンのワードをグローバル配列に格納
+     Select Case SProperty
+        Case Is = PROPERTY1 '子モデル
+           Call SetModelNames(SRange.Offset(3, 0).CurrentRegion)
+        Case Is = PROPERTY2 '定数パラメータ
+           Call SetConstNames(SRange.Offset(3, 0).CurrentRegion)
+        Case Is = PROPERTY3 '1次元テーブル
+           Call SetTableNames(SRange.Offset(3, 0).CurrentRegion)
+        Case Else
+            MsgBox "Select case Error"
+            GoTo Err1
+     End Select
+  
+  Loop
+  
+  GetModelProperty = NumOfFind
+  GoTo Exit1
+
+
+Err1:
+   MsgBox ("Error:" & FileName)
+   
+Exit1:
+   If Not wb Is Nothing Then
+      wb.Close
+      GetModelProperty = NumOfFind
+   Else
+      'ファイルオープン失敗
+      GetModelProperty = -1
+   End If
+   
+End Function
+
+
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'機能:フォルダ名称の検証と修正
+'
+'入力:フォルダ名称
+'出力:正しいフォルダ名称
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Function MakeDirName(str As String) As String
+   Dim s As String
+
+   s = Trim(str) '先頭と末尾の空白削除
+   '末尾の"\"を消す
+   Do While Right(s, 1) = "\"
+      s = Mid(s, 1, Len(s) - 1)
+   Loop
+   MakeDirName = s
+End Function
+
+
+
