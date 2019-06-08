@@ -1,0 +1,78 @@
+'Global
+Dim fcnparam(1000) As String
+Dim n_fcnparam As Integer
+
+
+'
+Sub stab01()
+Call SetFcnParam(Range("B4"), "t", "")
+End Sub
+
+
+' r 以降からMATLAB finctionの引数中のtyパラメータを
+' 抽出する。検索はtyで始まるもので、DDで検証が必要。
+' また､データの先頭に引数hも文字列をつける｡
+'
+' r:基準位置、ty:先頭文字、h:先頭付加文字列
+Sub SetFcnParam(r As Range, ty As String, h As String)
+
+Dim wStr, str, str2 As String
+Dim t, i As Integer
+Dim inps As Boolean
+Dim arry() As String
+
+i = 0
+n_fcnparam = 0 '発見した個数
+inps = False
+
+Do While True
+
+   str = r.Offset(i, 0).Value
+   str = Replace(str, " ", "") '全スペース削除
+   
+   '開始点検索
+   t = InStr(str, "fcn(")
+   
+   If t <> 0 Then '開始点
+      n_fcnparam = 0
+      inps = True
+      wStr = "" '引数全体文字列
+      str2 = Mid(str, t + 4)
+   Else
+      If inps Then '開始中
+         str2 = str
+      End If
+   End If
+   
+   If inps Then '開始点か開始中
+   
+      t = InStr(str2, "+++") '改行文字検索
+      If t <> 0 Then
+         str2 = Mid(str2, 1, t - 1) '改行文字列以降削除
+      End If
+      
+      t = InStr(str2, ")") '引数終了検索
+      If t <> 0 Then
+         str2 = Mid(str2, 1, t - 1) '終了以降削除
+         endp = True '終了フラグ
+      End If
+      
+      wStr = wStr & str2 '全体文字列に結合
+      
+      If endp Then
+         arry = Split(wStr, ",")
+         For Each v In arry
+            If Left(v, 1) = ty Then
+               fcnparam(n_fcnparam) = h & v
+               n_fcnparam = n_fcnparam + 1
+            End If
+         Next
+         Exit Sub
+      End If
+      
+   End If
+   
+   i = i + 1
+Loop
+
+End Sub
