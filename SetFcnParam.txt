@@ -30,6 +30,12 @@ Do While True
    str = r.Offset(i, 0).Value
    str = Replace(str, " ", "") '全スペース削除
    
+   If str = "end" Then '処理失敗で終了
+      n_fcnparam = 0
+      Debug.Print "MATLAB function引数内検索失敗"
+      Exit Sub
+   End If
+   
    '開始点検索
    t = InStr(str, "fcn(")
    
@@ -59,10 +65,10 @@ Do While True
       
       wStr = wStr & str2 '全体文字列に結合
       
-      If endp Then
-         arry = Split(wStr, ",")
+      If endp Then '引数全体文字列作成完了
+         arry = Split(wStr, ",") 'カンマで分離する
          For Each v In arry
-            If Left(v, 1) = ty Then
+            If Left(v, 1) = ty Then '結果を格納する
                fcnparam(n_fcnparam) = h & v
                n_fcnparam = n_fcnparam + 1
             End If
